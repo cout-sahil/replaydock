@@ -7,7 +7,7 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "events", uniqueConstraints = @UniqueConstraint(name = "unique_source_event", columnNames = {"endpoint_id", "source_id"}), indexes = @Index(name = "due_events", columnList = "status,next_attempt_at"))
-public class WebhookEvent {
+public class WebhookEvent extends AssignedEntity<String> {
     @Id @Column(name = "id", nullable = false, length = 36)
     private String id;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "endpoint_id", nullable = false)

@@ -7,7 +7,7 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "attempts")
-public class DeliveryAttempt {
+public class DeliveryAttempt extends AssignedEntity<String> {
     @Id @Column(name = "id", nullable = false, length = 36)
     private String id;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "event_id", nullable = false)

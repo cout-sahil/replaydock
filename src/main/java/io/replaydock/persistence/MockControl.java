@@ -7,7 +7,7 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "mock_controls")
-public class MockControl {
+public class MockControl extends AssignedEntity<String> {
     @Id @Column(name = "endpoint_id", nullable = false, length = 36)
     private String endpointId;
     @MapsId @OneToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "endpoint_id", nullable = false)
@@ -27,6 +27,7 @@ public class MockControl {
         this.failureStatus = failureStatus;
         this.delayMs = delayMs;
     }
+    @Override public String getId() { return endpointId; }
     public String getEndpointId() { return endpointId; }
     public void setEndpointId(String endpointId) { this.endpointId = endpointId; }
     public WebhookEndpoint getEndpoint() { return endpoint; }

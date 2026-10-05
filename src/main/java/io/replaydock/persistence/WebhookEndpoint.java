@@ -7,7 +7,7 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "endpoints")
-public class WebhookEndpoint {
+public class WebhookEndpoint extends AssignedEntity<String> {
     @Id @Column(name = "id", nullable = false, length = 36)
     private String id;
     @Column(name = "name", nullable = false, length = 80)

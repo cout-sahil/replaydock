@@ -7,7 +7,7 @@ import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "mock_processed")
-public class ProcessedEvent {
+public class ProcessedEvent extends AssignedEntity<ProcessedEventId> {
     @EmbeddedId
     private ProcessedEventId id;
     @MapsId("endpointId") @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "endpoint_id", nullable = false)
