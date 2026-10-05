@@ -13,22 +13,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.Import;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@Import(TestDatabase.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT, properties = {
     "server.port=18089", "spring.datasource.url=jdbc:h2:mem:http-tests;DB_CLOSE_DELAY=-1",
     "replaydock.worker-enabled=false", "replaydock.admin-password=test-password"})
 class HttpApiTest {
     @Autowired DockService dock;
     @Autowired DeliveryWorker worker;
-    @Autowired JdbcTemplate db;
+    @Autowired TestDatabase db;
     private final HttpClient client = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
     private final JsonMapper json = JsonMapper.builder().build();
     private CreatedEndpoint created;
     @BeforeEach void setup() {
-        for (String table : new String[]{"attempts", "mock_processed", "mock_controls", "events", "endpoints"}) db.update("DELETE FROM " + table);
+        db.clear();
         created = dock.createEndpoint(new NewEndpoint("HTTP test", null, 5, 100L));
     }
     @Test void signedIngressRejectsTamperingAndOversizedBodies() throws Exception {
@@ -44,7 +45,7 @@ class HttpApiTest {
         assertThat(dock.event(id).status()).isEqualTo("PENDING");
         HttpResponse<String> duplicate = ingress("payment-1", "{}", created.signingSecret(), Instant.now().getEpochSecond());
         assertThat(json.readTree(duplicate.body()).get("duplicate").asBoolean()).isTrue();
-        for (int i = 0; i < 3; i++) { db.update("UPDATE events SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=?", id); worker.deliverOne(); }
+        for (int i = 0; i < 3; i++) { db.makeDue(id); worker.deliverOne(); }
         assertThat(dock.event(id).status()).isEqualTo("DELIVERED");
         assertThat(dock.attempts(id)).extracting(Attempt::httpStatus).containsExactly(503, 503, 200);
         dock.replay(id); worker.deliverOne();

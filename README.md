@@ -12,7 +12,7 @@ ReplayDock accepts signed events into a durable inbox, acknowledges the sender, 
 2. Create an endpoint with the destination left empty.
 3. Keep the receiver controls at **2 failures**, **503**, **0 ms delay**.
 4. Click **Run recovery demo**. The source gets `202 Accepted` immediately after the event is committed.
-5. Watch the timeline: `503 → 503 → 200`, with increasing backoff.
+5. Watch the timeline: `503 â†’ 503 â†’ 200`, with increasing backoff.
 6. Click **Replay event**. Delivery succeeds again, but the receiver's unique business-action count stays at **1**.
 
 Try `400` to see a permanent failure, more failures than the attempt budget to create a dead letter, or a delay over 3000 ms to simulate an ambiguous timeout.
@@ -79,7 +79,7 @@ sequenceDiagram
     Worker->>DB: Record success, mark DELIVERED
 ```
 
-Events move through `PENDING → DELIVERING → DELIVERED`, or back to `PENDING` on retry, or to `DEAD`. The worker sends one event at a time; database claims are committed before the network call. This intentionally favors an understandable single-instance lab over a distributed queue.
+Events move through `PENDING â†’ DELIVERING â†’ DELIVERED`, or back to `PENDING` on retry, or to `DEAD`. The worker sends one event at a time; database claims are committed before the network call. This intentionally favors an understandable single-instance lab over a distributed queue.
 
 ### Delivery guarantee
 
@@ -120,18 +120,27 @@ export REPLAYDOCK_ALLOWED_ORIGINS='https://receiver.example'
 
 Destination URLs must use HTTPS, have no embedded credentials or fragment, and match an allowed origin including its non-default port. Redirects are not followed. Only approve destinations you control; this origin allowlist is not DNS-rebinding protection.
 
+## JPA persistence
+
+The application uses Spring Data JPA and Hibernate. `WebhookEndpoint`, `WebhookEvent`, `DeliveryAttempt`, `MockControl`, and `ProcessedEvent` map to the existing tables. Relationships use lazy associations; controllers return immutable API records instead of exposing entities or secrets.
+
+`@Transactional` services commit acceptance before returning to the controller and record an attempt together with its next event state. Endpoint and mock-control row locks serialize duplicate handling. A conditional JPQL update claims a pending event atomically. The HTTP request remains outside database transactions.
+
+`schema.sql` still initializes the stable schema, and `ddl-auto=validate` verifies mappings without rewriting existing tables or deleting data. Open Session in View is disabled.
+
 ## Project layout
 
 ```text
 src/main/java/io/replaydock/
   ApiController.java       Admin API, signed ingress and mock receiver
-  DockService.java         Durable inbox and state transitions
+  DockService.java         Transactional orchestration and API record mapping
+  persistence/             JPA entities and Spring Data repositories
   DeliveryWorker.java      HTTP dispatcher and restart recovery
   Signatures.java          HMAC generation and validation
   TargetPolicy.java        Destination origin allowlist
   SecurityConfig.java      Admin authentication and CSRF protection
 src/main/resources/
-  schema.sql               Inbox, attempts, endpoints and mock tables
+  schema.sql               Stable schema; Hibernate validates entity mappings
   static/                  Dashboard (vanilla JS/CSS)
 src/test/                  Delivery and authentication regression tests
 docs/                      API and architecture details

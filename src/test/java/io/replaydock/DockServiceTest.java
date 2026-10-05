@@ -7,16 +7,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.Import;
 import org.springframework.web.server.ResponseStatusException;
 
+@Import(TestDatabase.class)
 @SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:service-tests;DB_CLOSE_DELAY=-1", "replaydock.worker-enabled=false", "replaydock.admin-password=test-password"})
 class DockServiceTest {
     @Autowired DockService dock;
-    @Autowired JdbcTemplate db;
+    @Autowired TestDatabase db;
     String endpoint;
     @BeforeEach void setup() {
-        for (String table : new String[]{"attempts", "mock_processed", "mock_controls", "events", "endpoints"}) db.update("DELETE FROM " + table);
+        db.clear();
         endpoint = dock.createEndpoint(new NewEndpoint("Test", null, 3, 100L)).endpoint().id();
     }
     @Test void duplicateAcceptanceDoesNotQueueAnotherEvent() {
@@ -65,6 +66,39 @@ class DockServiceTest {
         assertThatThrownBy(() -> dock.createEndpoint(new NewEndpoint("bad", "http://169.254.169.254/", 3, 100L))).hasMessageContaining("400");
         assertThatThrownBy(() -> dock.accept(endpoint, "large", "x".repeat(65537))).hasMessageContaining("413");
     }
+    @Test void concurrentClaimsHaveOnlyOneWinner() throws Exception {
+        Receipt receipt = dock.accept(endpoint, "claim-race", "{}");
+        var results = concurrently(dock::claimDue);
+        assertThat(results.stream().filter(java.util.Objects::nonNull).map(Event::id).toList()).containsExactly(receipt.eventId());
+        assertThat(dock.event(receipt.eventId()).status()).isEqualTo("DELIVERING");
+    }
+    @Test void concurrentDuplicateAcceptanceQueuesOneEvent() throws Exception {
+        var results = concurrently(() -> dock.accept(endpoint, "accept-race", "{}"));
+        assertThat(results.stream().map(Receipt::eventId).distinct().count()).isEqualTo(1);
+        assertThat(results.stream().filter(r -> !r.duplicate()).count()).isEqualTo(1);
+        assertThat(dock.events()).hasSize(1);
+    }
+    @Test void concurrentMockDuplicatesPerformOneBusinessAction() throws Exception {
+        dock.configureMock(endpoint, new MockConfig(0, 503, 0));
+        var results = concurrently(() -> dock.processMock(endpoint, "mock-race"));
+        assertThat(results).allMatch(r -> r.status() == 200);
+        assertThat(results.stream().filter(r -> r.message().equals("Business action processed once")).count()).isEqualTo(1);
+        assertThat(dock.mockState(endpoint).processedCount()).isEqualTo(1);
+    }
+    private <T> java.util.List<T> concurrently(java.util.concurrent.Callable<T> task) throws Exception {
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(8);
+        var ready = new java.util.concurrent.CountDownLatch(8);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            var futures = new java.util.ArrayList<java.util.concurrent.Future<T>>();
+            for (int i = 0; i < 8; i++) futures.add(executor.submit(() -> { ready.countDown(); start.await(); return task.call(); }));
+            assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            var results = new java.util.ArrayList<T>();
+            for (var future : futures) results.add(future.get(10, java.util.concurrent.TimeUnit.SECONDS));
+            return results;
+        } finally { start.countDown(); executor.shutdownNow(); }
+    }
     private Event claim(String expected) { Event event = dock.claimDue(); assertThat(event.id()).isEqualTo(expected); return event; }
-    private void makeDue(String id) { db.update("UPDATE events SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=?", id); }
+    private void makeDue(String id) { db.makeDue(id); }
 }
